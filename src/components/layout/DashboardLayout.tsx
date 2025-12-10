@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../stores/useAuthStore'
+import { OrganizationSelector } from '../organization/OrganizationSelector'
 import { 
   BarChart3, 
   CreditCard, 
@@ -43,7 +44,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
         {/* Logo Section */}
         <div className="bg-gradient-to-r from-primary-500 to-primary-600 shadow-lg h-16 flex items-center justify-between px-6">
           {isSidebarOpen && (
-            <h1 className="text-xl font-bold text-white">Ate Lorie's POS</h1>
+            <h1 className="text-xl font-bold text-white">Bentally POS</h1>
           )}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -109,6 +110,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
             </div>
             
             <div className="flex items-center space-x-4">
+              <OrganizationSelector />
               <div className="text-sm text-primary-50">
                 Welcome back, <span className="font-medium text-white">{user?.name}</span>
               </div>

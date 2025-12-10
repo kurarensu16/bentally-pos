@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { usePosStore } from '../../stores/usePosStore'
+import { useOrganizationStore } from '../../stores/useOrganizationStore'
 import { formatCurrency } from '../../lib/utils'
 import { api } from '../../lib/api'
 import { offlineStore, isOnline } from '../../lib/offlineStore'
@@ -82,6 +83,7 @@ export const OrderPanel: React.FC = () => {
     getCartTotal,
     clearCart 
   } = usePosStore()
+  const { currentOrganization } = useOrganizationStore()
 
   const [isProcessing, setIsProcessing] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
@@ -115,7 +117,7 @@ export const OrderPanel: React.FC = () => {
     try {
       let order: any = null
       
-      if (isOnline()) {
+      if (isOnline() && currentOrganization) {
         // Online: Create order in database
         order = await api.createOrder({
           customer_name: customerName,
@@ -125,14 +127,14 @@ export const OrderPanel: React.FC = () => {
           menu_item_id: item.menu_item_id,
           quantity: item.quantity,
           unit_price: item.unit_price
-        })))
+        })), currentOrganization.id)
 
         // Complete the order with payment
         await api.completeOrder(order.id, {
           amount: total,
           method: paymentMethod,
           status: 'completed'
-        })
+        }, currentOrganization.id)
       } else {
         // Offline: Store order locally
         const offlineOrder = {
@@ -157,6 +159,13 @@ export const OrderPanel: React.FC = () => {
       // Generate receipt data
       const selectedMethod = paymentMethods.find(m => m.id === paymentMethod)
       const orderId = order.id
+      const organizationDetails = {
+        name: currentOrganization?.name || currentOrganization?.settings?.name || 'Bentally POS',
+        address: currentOrganization?.settings?.address || '',
+        phone: currentOrganization?.settings?.phone || '',
+        email: currentOrganization?.settings?.email || ''
+      }
+
       const receiptInfo = {
         orderId: orderId,
         orderNumber: orderId.slice(-6),
@@ -169,7 +178,8 @@ export const OrderPanel: React.FC = () => {
         paymentMethodId: paymentMethod,
         timestamp: new Date().toLocaleString(),
         date: new Date().toLocaleDateString(),
-        time: new Date().toLocaleTimeString()
+        time: new Date().toLocaleTimeString(),
+        organization: organizationDetails
       }
       
       setReceiptData(receiptInfo)
@@ -337,9 +347,18 @@ export const OrderPanel: React.FC = () => {
               <div className="space-y-4 text-sm">
                 {/* Restaurant Header */}
                 <div className="text-center border-b pb-4">
-                  <h3 className="text-lg font-bold text-gray-900">Ate Lorie's Restaurant</h3>
-                  <p className="text-gray-600">123 Main Street, City, State 12345</p>
-                  <p className="text-gray-600">(555) 123-4567</p>
+                  <h3 className="text-lg font-bold text-gray-900">
+                    {receiptData.organization?.name || 'Restaurant'}
+                  </h3>
+                  {receiptData.organization?.address && (
+                    <p className="text-gray-600">{receiptData.organization.address}</p>
+                  )}
+                  {receiptData.organization?.phone && (
+                    <p className="text-gray-600">{receiptData.organization.phone}</p>
+                  )}
+                  {receiptData.organization?.email && (
+                    <p className="text-gray-600">{receiptData.organization.email}</p>
+                  )}
                 </div>
 
                 {/* Order Info */}

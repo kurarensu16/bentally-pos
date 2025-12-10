@@ -1,6 +1,7 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/useAuthStore'
+import { useOrganizationStore } from '../../stores/useOrganizationStore'
 import { formatCurrency } from '../../lib/utils'
 import { api } from '../../lib/api'
 
@@ -26,15 +27,18 @@ interface RecentOrder {
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuthStore()
+  const { currentOrganization } = useOrganizationStore()
 
   const { data: recentOrders = [] } = useQuery({
-    queryKey: ['recentOrders'],
-    queryFn: () => api.getRecentOrders(5)
+    queryKey: ['recentOrders', currentOrganization?.id],
+    queryFn: () => api.getRecentOrders(currentOrganization!.id, 5),
+    enabled: !!currentOrganization
   })
 
   const { data: menuItems = [] } = useQuery({
-    queryKey: ['menuItems'],
-    queryFn: api.getMenuItems
+    queryKey: ['menuItems', currentOrganization?.id],
+    queryFn: () => api.getMenuItems(currentOrganization!.id),
+    enabled: !!currentOrganization
   })
 
   // Calculate dashboard stats from real data

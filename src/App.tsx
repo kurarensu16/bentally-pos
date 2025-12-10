@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from './stores/useAuthStore'
 import { LoginForm } from './components/auth/LoginForm'
+import { RegisterForm } from './components/auth/RegisterForm'
 import { DashboardLayout } from './components/layout/DashboardLayout'
 import { Dashboard } from './components/dashboard/Dashboard'
 import { PosPage } from './components/pos/PosPage'
@@ -10,20 +11,21 @@ import { OrdersPage } from './components/pages/OrdersPage'
 import { MenuPage } from './components/pages/MenuPage'
 import { ReportsPage } from './components/pages/ReportsPage'
 import { SettingsPage } from './components/pages/SettingsPage'
+import { LandingPage } from './components/pages/LandingPage'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { PWAInstallPrompt } from './components/PWAInstallPrompt'
 
 const queryClient = new QueryClient()
 
 function AppContent() {
-  const { isAuthenticated, checkAuth, isLoading } = useAuthStore()
+  const { isAuthenticated, checkAuth, isInitialized } = useAuthStore()
 
   useEffect(() => {
     checkAuth()
   }, [checkAuth])
 
   // Show loading state while checking authentication
-  if (isLoading) {
+  if (!isInitialized) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -40,9 +42,23 @@ function AppContent() {
         <Routes>
           {/* Public Routes */}
           <Route 
+            path="/" 
+            element={
+              isAuthenticated ? <Navigate to="/dashboard" replace /> : <LandingPage />
+            } 
+          />
+          
+          <Route 
             path="/login" 
             element={
               isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginForm />
+            } 
+          />
+          
+          <Route 
+            path="/register" 
+            element={
+              isAuthenticated ? <Navigate to="/dashboard" replace /> : <RegisterForm />
             } 
           />
           
@@ -113,16 +129,10 @@ function AppContent() {
             }
           />
 
-          {/* Default redirect - send unauthenticated users to /login */}
-          <Route
-            path="/"
-            element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />}
-          />
-
           {/* 404 fallback - respect auth status */}
           <Route
             path="*"
-            element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />}
+            element={<Navigate to={isAuthenticated ? "/dashboard" : "/"} replace />}
           />
         </Routes>
       </Router>

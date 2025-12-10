@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useEffect, useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import { useAuthStore } from '../../stores/useAuthStore'
+import { useOrganizationStore } from '../../stores/useOrganizationStore'
 import { Settings as SettingsIcon, Building2, Users as UsersIcon, Wrench } from 'lucide-react'
 
 interface RestaurantSettings {
@@ -12,7 +12,6 @@ interface RestaurantSettings {
   currency: string
   tax_rate: number
   service_charge: number
-  timezone: string
   operating_hours: {
     monday: { open: string; close: string; closed: boolean }
     tuesday: { open: string; close: string; closed: boolean }
@@ -24,34 +23,62 @@ interface RestaurantSettings {
   }
 }
 
+const defaultOperatingHours: RestaurantSettings['operating_hours'] = {
+  monday: { open: '09:00', close: '22:00', closed: false },
+  tuesday: { open: '09:00', close: '22:00', closed: false },
+  wednesday: { open: '09:00', close: '22:00', closed: false },
+  thursday: { open: '09:00', close: '22:00', closed: false },
+  friday: { open: '09:00', close: '23:00', closed: false },
+  saturday: { open: '10:00', close: '23:00', closed: false },
+  sunday: { open: '10:00', close: '21:00', closed: false },
+}
+
+const getMergedSettings = (organization?: any): RestaurantSettings => {
+  const orgSettings = organization?.settings || {}
+  const mergeOperatingHours = (
+    incoming: Partial<RestaurantSettings['operating_hours']> = {}
+  ) => {
+    const result: RestaurantSettings['operating_hours'] = { ...defaultOperatingHours }
+    Object.keys(defaultOperatingHours).forEach((day) => {
+      if (incoming[day as keyof typeof incoming]) {
+        result[day as keyof typeof result] = {
+          ...defaultOperatingHours[day as keyof typeof defaultOperatingHours],
+          ...incoming[day as keyof typeof incoming],
+        }
+      }
+    })
+    return result
+  }
+
+  return {
+    name: organization?.name || orgSettings.name || '',
+    address: orgSettings.address || '',
+    phone: orgSettings.phone || '',
+    email: orgSettings.email || '',
+    currency: orgSettings.currency || 'USD',
+    tax_rate: orgSettings.tax_rate ?? 0,
+    service_charge: orgSettings.service_charge ?? 0,
+    operating_hours: mergeOperatingHours(orgSettings.operating_hours),
+  }
+}
+
 export const SettingsPage: React.FC = () => {
   const { user, logout } = useAuthStore()
-  const queryClient = useQueryClient()
+  const { currentOrganization } = useOrganizationStore()
   const [activeTab, setActiveTab] = useState<'general' | 'business' | 'users' | 'system'>('general')
   const [isEditing, setIsEditing] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  // Mock settings data - in a real app, this would come from an API
-  const [settings, setSettings] = useState<RestaurantSettings>({
-    name: "Ate Lorie's Restaurant",
-    address: "123 Main Street, City, State 12345",
-    phone: "(555) 123-4567",
-    email: "info@atelories.com",
-    currency: "USD",
-    tax_rate: 8.5,
-    service_charge: 0,
-    timezone: "America/New_York",
-    operating_hours: {
-      monday: { open: "09:00", close: "22:00", closed: false },
-      tuesday: { open: "09:00", close: "22:00", closed: false },
-      wednesday: { open: "09:00", close: "22:00", closed: false },
-      thursday: { open: "09:00", close: "22:00", closed: false },
-      friday: { open: "09:00", close: "23:00", closed: false },
-      saturday: { open: "10:00", close: "23:00", closed: false },
-      sunday: { open: "10:00", close: "21:00", closed: false }
-    }
-  })
+  const [settings, setSettings] = useState<RestaurantSettings>(getMergedSettings())
+  const [formData, setFormData] = useState<RestaurantSettings>(getMergedSettings())
 
-  const [formData, setFormData] = useState<RestaurantSettings>(settings)
+  useEffect(() => {
+    if (!currentOrganization) return
+    const merged = getMergedSettings(currentOrganization)
+    setSettings(merged)
+    setFormData(merged)
+  }, [currentOrganization])
 
   const handleInputChange = (field: keyof RestaurantSettings, value: any) => {
     setFormData(prev => ({
@@ -73,11 +100,41 @@ export const SettingsPage: React.FC = () => {
     }))
   }
 
-  const handleSave = () => {
-    setSettings(formData)
-    setIsEditing(false)
-    // In a real app, this would save to the database
-    alert('Settings saved successfully!')
+  const handleSave = async () => {
+    if (!currentOrganization) return
+    try {
+      setIsSaving(true)
+      const { name, ...rest } = formData
+      const updatedOrganization = await api.updateOrganizationSettings(currentOrganization.id, {
+        name,
+        settings: {
+          ...currentOrganization.settings,
+          ...rest,
+          operating_hours: rest.operating_hours
+        }
+      })
+
+      const merged = getMergedSettings(updatedOrganization)
+      setSettings(merged)
+      setFormData(merged)
+
+      useOrganizationStore.setState((state) => ({
+        organizations: state.organizations.map(org =>
+          org.id === updatedOrganization.id ? { ...org, ...updatedOrganization } : org
+        ),
+        currentOrganization: state.currentOrganization && state.currentOrganization.id === updatedOrganization.id
+          ? { ...state.currentOrganization, ...updatedOrganization }
+          : state.currentOrganization
+      }))
+
+      setIsEditing(false)
+      setStatusMessage({ type: 'success', text: 'Settings saved successfully.' })
+    } catch (error: any) {
+      console.error('Failed to save settings', error)
+      setStatusMessage({ type: 'error', text: error.message || 'Failed to save settings.' })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleCancel = () => {
@@ -102,6 +159,17 @@ export const SettingsPage: React.FC = () => {
     { key: 'sunday', name: 'Sunday' }
   ]
 
+  if (!currentOrganization) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-center">
+          <p className="text-lg text-gray-600 mb-2">No organization selected</p>
+          <p className="text-sm text-gray-500">Select or create an organization to manage settings.</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -123,9 +191,10 @@ export const SettingsPage: React.FC = () => {
               </button>
               <button
                 onClick={handleSave}
-                className="bg-primary-500 text-white px-4 py-2 rounded-md font-medium hover:bg-primary-600 transition-colors"
+                disabled={isSaving}
+                className="bg-primary-500 text-white px-4 py-2 rounded-md font-medium hover:bg-primary-600 transition-colors disabled:opacity-50"
               >
-                Save Changes
+                {isSaving ? 'Saving...' : 'Save Changes'}
               </button>
             </>
           ) : (
@@ -138,6 +207,18 @@ export const SettingsPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {statusMessage && (
+        <div
+          className={`rounded-lg px-4 py-3 ${
+            statusMessage.type === 'success'
+              ? 'bg-green-50 text-green-800 border border-green-200'
+              : 'bg-red-50 text-red-800 border border-red-200'
+          }`}
+        >
+          {statusMessage.text}
+        </div>
+      )}
 
       {/* Tab Navigation */}
       <div className="bg-white rounded-lg shadow-sm border">
@@ -205,22 +286,6 @@ export const SettingsPage: React.FC = () => {
                       disabled={!isEditing}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-50 disabled:text-gray-500"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Timezone
-                    </label>
-                    <select
-                      value={formData.timezone}
-                      onChange={(e) => handleInputChange('timezone', e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-50 disabled:text-gray-500"
-                    >
-                      <option value="America/New_York">Eastern Time</option>
-                      <option value="America/Chicago">Central Time</option>
-                      <option value="America/Denver">Mountain Time</option>
-                      <option value="America/Los_Angeles">Pacific Time</option>
-                    </select>
                   </div>
                 </div>
                 <div className="mt-6">

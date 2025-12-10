@@ -1,21 +1,26 @@
 import React, { useState, useEffect } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { type MenuItem } from '../../types'
+import { useOrganizationStore } from '../../stores/useOrganizationStore'
 
 interface MenuModalProps {
   item?: MenuItem | null
   categories: any[]
   onClose: () => void
   onSuccess: () => void
+  onNotify?: (payload: { type: 'success' | 'error'; message: string }) => void
 }
 
 export const MenuModal: React.FC<MenuModalProps> = ({ 
   item, 
   categories, 
   onClose, 
-  onSuccess 
+  onSuccess,
+  onNotify
 }) => {
+  const { currentOrganization } = useOrganizationStore()
+  const queryClient = useQueryClient()
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -24,6 +29,9 @@ export const MenuModal: React.FC<MenuModalProps> = ({
     is_available: true
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [isAddingCategory, setIsAddingCategory] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [categoryError, setCategoryError] = useState('')
 
 
   useEffect(() => {
@@ -50,18 +58,36 @@ export const MenuModal: React.FC<MenuModalProps> = ({
   }, [item, categories])
 
   const createMutation = useMutation({
-    mutationFn: api.createMenuItem,
+    mutationFn: (data: any) => api.createMenuItem(data, currentOrganization!.id),
     onSuccess: () => {
-      alert('Menu item created successfully')
+      onNotify?.({ type: 'success', message: 'Menu item created successfully' })
       onSuccess()
     }
   })
 
   const updateMutation = useMutation({
-    mutationFn: (data: { id: string; data: any }) => api.updateMenuItem(data.id, data.data),
+    mutationFn: (data: { id: string; data: any }) => api.updateMenuItem(data.id, data.data, currentOrganization!.id),
     onSuccess: () => {
-      alert('Menu item updated successfully')
+      onNotify?.({ type: 'success', message: 'Menu item updated successfully' })
       onSuccess()
+    }
+  })
+
+  const createCategoryMutation = useMutation({
+    mutationFn: (categoryName: string) => api.createCategory(categoryName, currentOrganization!.id),
+    onSuccess: (newCategory) => {
+      queryClient.invalidateQueries({ queryKey: ['categories', currentOrganization?.id] })
+      setFormData((prev) => ({
+        ...prev,
+        category_id: newCategory.id
+      }))
+      setIsAddingCategory(false)
+      setNewCategoryName('')
+      setCategoryError('')
+      alert('Category created successfully')
+    },
+    onError: (error: any) => {
+      setCategoryError(error?.message || 'Failed to create category')
     }
   })
 
@@ -114,7 +140,20 @@ export const MenuModal: React.FC<MenuModalProps> = ({
     } catch (error: any) {
       console.error('Error:', error)
       const errorMessage = error?.message || `Error ${item ? 'updating' : 'creating'} menu item`
-      alert(errorMessage)
+      onNotify?.({ type: 'error', message: errorMessage })
+    }
+  }
+
+  const handleCreateCategory = async () => {
+    if (!newCategoryName.trim()) {
+      setCategoryError('Category name is required')
+      return
+    }
+
+    try {
+      await createCategoryMutation.mutateAsync(newCategoryName.trim())
+    } catch {
+      // handled via onError
     }
   }
 
@@ -219,6 +258,60 @@ export const MenuModal: React.FC<MenuModalProps> = ({
               {errors.category_id && (
                 <p className="mt-1 text-sm text-red-600">{errors.category_id}</p>
               )}
+
+              <div className="mt-2">
+                {!isAddingCategory ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingCategory(true)
+                      setCategoryError('')
+                    }}
+                    className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                  >
+                    + Create new category
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => {
+                        setNewCategoryName(e.target.value)
+                        if (categoryError) setCategoryError('')
+                      }}
+                      className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                      placeholder="Category name"
+                      disabled={createCategoryMutation.isPending}
+                    />
+                    {categoryError && (
+                      <p className="text-sm text-red-600">{categoryError}</p>
+                    )}
+                    <div className="flex space-x-2">
+                      <button
+                        type="button"
+                        onClick={handleCreateCategory}
+                        disabled={createCategoryMutation.isPending}
+                        className="flex-1 bg-primary-500 text-white py-2 rounded-md font-medium hover:bg-primary-600 disabled:opacity-50"
+                      >
+                        {createCategoryMutation.isPending ? 'Saving...' : 'Save Category'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAddingCategory(false)
+                          setNewCategoryName('')
+                          setCategoryError('')
+                        }}
+                        disabled={createCategoryMutation.isPending}
+                        className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-md font-medium hover:bg-gray-300 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center">

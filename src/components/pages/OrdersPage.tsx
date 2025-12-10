@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { formatCurrency } from '../../lib/utils'
+import { useOrganizationStore } from '../../stores/useOrganizationStore'
 
 interface OrderWithDetails {
   id: string
@@ -39,11 +40,33 @@ export const OrdersPage: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<OrderWithDetails | null>(null)
   const [showOrderDetails, setShowOrderDetails] = useState(false)
   const queryClient = useQueryClient()
+  const { currentOrganization, isLoading: isLoadingOrgs } = useOrganizationStore()
 
   const { data: orders = [], isLoading } = useQuery({
-    queryKey: ['orders'],
-    queryFn: () => api.getRecentOrders()
+    queryKey: ['orders', currentOrganization?.id],
+    queryFn: () => api.getRecentOrders(currentOrganization!.id),
+    enabled: !!currentOrganization
   })
+
+  // Show loading or no org message
+  if (isLoadingOrgs) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-lg text-gray-600">Loading organization...</div>
+      </div>
+    )
+  }
+
+  if (!currentOrganization) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-center">
+          <p className="text-lg text-gray-600 mb-2">No organization selected</p>
+          <p className="text-sm text-gray-500">Please select an organization to view orders.</p>
+        </div>
+      </div>
+    )
+  }
 
   // Filter orders based on current filter and search query
   const filteredOrders = orders.filter((order: OrderWithDetails) => {

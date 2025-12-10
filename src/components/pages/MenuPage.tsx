@@ -1,9 +1,10 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { formatCurrency } from '../../lib/utils'
 import { type MenuItem } from '../../types'
 import { MenuModal } from './MenuModal'
+import { useOrganizationStore } from '../../stores/useOrganizationStore'
 
 export const MenuPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -12,16 +13,20 @@ export const MenuPage: React.FC = () => {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
   const [showBulkActions, setShowBulkActions] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const queryClient = useQueryClient()
+  const { currentOrganization, isLoading: isLoadingOrgs } = useOrganizationStore()
 
   const { data: menuItems = [], isLoading } = useQuery({
-    queryKey: ['menuItems'],
-    queryFn: api.getMenuItems
+    queryKey: ['menuItems', currentOrganization?.id],
+    queryFn: () => api.getMenuItems(currentOrganization!.id),
+    enabled: !!currentOrganization
   })
 
   const { data: categories = [] } = useQuery({
-    queryKey: ['categories'],
-    queryFn: api.getCategories
+    queryKey: ['categories', currentOrganization?.id],
+    queryFn: () => api.getCategories(currentOrganization!.id),
+    enabled: !!currentOrganization
   })
 
   // Filter menu items based on current filter and search query
@@ -55,9 +60,9 @@ export const MenuPage: React.FC = () => {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: api.deleteMenuItem,
+    mutationFn: (id: string) => api.deleteMenuItem(id, currentOrganization!.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['menuItems'] })
+      queryClient.invalidateQueries({ queryKey: ['menuItems', currentOrganization?.id] })
       alert('Menu item deleted successfully')
     }
   })
@@ -165,11 +170,17 @@ export const MenuPage: React.FC = () => {
 
   const toggleTodayMenuMutation = useMutation({
     mutationFn: ({ id, isTodayMenu }: { id: string; isTodayMenu: boolean }) => 
-      api.toggleTodayMenu(id, isTodayMenu),
+      api.toggleTodayMenu(id, isTodayMenu, currentOrganization!.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['menuItems'] })
+      queryClient.invalidateQueries({ queryKey: ['menuItems', currentOrganization?.id] })
     }
   })
+
+  useEffect(() => {
+    if (!toast) return
+    const timeout = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(timeout)
+  }, [toast])
 
   const handleToggleTodayMenu = async (item: MenuItem) => {
     try {
@@ -183,12 +194,13 @@ export const MenuPage: React.FC = () => {
   }
 
   const handleBulkAddToToday = async () => {
+    if (!currentOrganization) return
     try {
       const promises = Array.from(selectedItems).map(id => 
-        api.toggleTodayMenu(id, true)
+        api.toggleTodayMenu(id, true, currentOrganization.id)
       )
       await Promise.all(promises)
-      queryClient.invalidateQueries({ queryKey: ['menuItems'] })
+      queryClient.invalidateQueries({ queryKey: ['menuItems', currentOrganization.id] })
       setSelectedItems(new Set())
       setShowBulkActions(false)
       alert('Selected items added to today\'s menu')
@@ -198,18 +210,38 @@ export const MenuPage: React.FC = () => {
   }
 
   const handleBulkRemoveFromToday = async () => {
+    if (!currentOrganization) return
     try {
       const promises = Array.from(selectedItems).map(id => 
-        api.toggleTodayMenu(id, false)
+        api.toggleTodayMenu(id, false, currentOrganization.id)
       )
       await Promise.all(promises)
-      queryClient.invalidateQueries({ queryKey: ['menuItems'] })
+      queryClient.invalidateQueries({ queryKey: ['menuItems', currentOrganization.id] })
       setSelectedItems(new Set())
       setShowBulkActions(false)
       alert('Selected items removed from today\'s menu')
     } catch (error) {
       alert('Error removing items from today\'s menu')
     }
+  }
+
+  if (isLoadingOrgs) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-lg text-gray-600">Loading organization...</div>
+      </div>
+    )
+  }
+
+  if (!currentOrganization) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-center">
+          <p className="text-lg text-gray-600 mb-2">No organization selected</p>
+          <p className="text-sm text-gray-500">Please select an organization to view menu items.</p>
+        </div>
+      </div>
+    )
   }
 
   if (isLoading) {
@@ -430,7 +462,7 @@ export const MenuPage: React.FC = () => {
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-4 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 p-4 sm:p-6">
               {filteredItems.map((item) => (
                 <div
                   key={item.id}
@@ -554,7 +586,29 @@ export const MenuPage: React.FC = () => {
             queryClient.invalidateQueries({ queryKey: ['menuItems'] })
             handleCloseModal()
           }}
+          onNotify={(payload) => setToast(payload)}
         />
+      )}
+
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 z-50 rounded-lg shadow-lg px-4 py-3 text-white transition-opacity ${
+            toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+          }`}
+        >
+          <div className="flex items-center space-x-2">
+            <span className="font-semibold">
+              {toast.type === 'success' ? 'Success' : 'Error'}
+            </span>
+            <p className="text-sm">{toast.message}</p>
+          </div>
+          <button
+            onClick={() => setToast(null)}
+            className="absolute top-1 right-2 text-white/80 hover:text-white text-sm"
+          >
+            ×
+          </button>
+        </div>
       )}
     </div>
   )

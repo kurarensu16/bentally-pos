@@ -5,18 +5,19 @@ type MenuItem = Database['public']['Tables']['menu_items']['Row']
 type Table = Database['public']['Tables']['tables']['Row']
 type OrderInsert = Database['public']['Tables']['orders']['Insert']
 type OrderItemInsert = Database['public']['Tables']['order_items']['Insert']
-type OrderItemCreate = Omit<OrderItemInsert, 'order_id'>
+type OrderItemCreate = Omit<OrderItemInsert, 'order_id' | 'organization_id'>
 type PaymentInsert = Database['public']['Tables']['payments']['Insert']
-type PaymentCreate = Omit<PaymentInsert, 'order_id'>
+type PaymentCreate = Omit<PaymentInsert, 'order_id' | 'organization_id'>
 
 export const api = {
   supabase,
   // Menu items
-  async getMenuItems() {
+  async getMenuItems(organizationId: string) {
     try {
       const { data, error } = await supabase
         .from('menu_items')
         .select('*')
+        .eq('organization_id', organizationId)
         .order('name')
       
       if (error) throw error
@@ -28,11 +29,12 @@ export const api = {
   },
 
   // Tables
-  async getTables() {
+  async getTables(organizationId: string) {
     try {
       const { data, error } = await supabase
         .from('tables')
         .select('*')
+        .eq('organization_id', organizationId)
         .order('number')
       
       if (error) throw error
@@ -44,12 +46,13 @@ export const api = {
   },
 
   // Update table status
-  async updateTableStatus(tableId: string, status: 'available' | 'occupied') {
+  async updateTableStatus(tableId: string, status: 'available' | 'occupied', organizationId: string) {
     try {
       const { error } = await (supabase as any)
         .from('tables')
         .update({ status: status })
-        .eq('id', tableId);
+        .eq('id', tableId)
+        .eq('organization_id', organizationId);
 
       if (error) throw error;
     } catch (error) {
@@ -58,13 +61,11 @@ export const api = {
   },
 
   // Create order
-  async createOrder(order: OrderInsert, orderItems: OrderItemCreate[]) {
+  async createOrder(order: Omit<OrderInsert, 'organization_id'>, orderItems: OrderItemCreate[], organizationId: string) {
     try {
-      // Handle both old and new schema during transition
       const orderData = {
         ...order,
-        // If customer_name doesn't exist in schema, try customer_count as fallback
-        ...(order.customer_name && { customer_name: order.customer_name })
+        organization_id: organizationId
       }
 
       // Start a transaction by creating the order first
@@ -112,7 +113,8 @@ export const api = {
       // Add order items
       const orderItemsWithOrderId = orderItems.map(item => ({
         ...item,
-        order_id: orderResult.id
+        order_id: orderResult.id,
+        organization_id: organizationId
       }))
 
       const { error: itemsError } = await (supabase as any)
@@ -129,14 +131,15 @@ export const api = {
   },
 
   // Complete order with payment
-  async completeOrder(orderId: string, payment: PaymentCreate) {
+  async completeOrder(orderId: string, payment: PaymentCreate, organizationId: string) {
     try {
       // Create payment record
       const { error: paymentError } = await (supabase as any)
         .from('payments')
         .insert([{
           ...payment,
-          order_id: orderId
+          order_id: orderId,
+          organization_id: organizationId
         }])
       
       if (paymentError) throw paymentError
@@ -159,11 +162,12 @@ export const api = {
   },
 
   // Get categories
-  async getCategories() {
+  async getCategories(organizationId: string) {
     try {
       const { data, error } = await supabase
         .from('categories')
         .select('*')
+        .eq('organization_id', organizationId)
         .order('sort_order')
       
       if (error) throw error
@@ -174,8 +178,51 @@ export const api = {
     }
   },
 
+  async createCategory(name: string, organizationId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .insert({
+          name,
+          organization_id: organizationId,
+          sort_order: Math.floor(Date.now() / 1000)
+        } as Database['public']['Tables']['categories']['Insert'])
+        .select()
+        .single()
+
+      if (error) throw error
+      return data as Database['public']['Tables']['categories']['Row']
+    } catch (error) {
+      handleSupabaseError(error)
+      throw error
+    }
+  },
+
+  async updateOrganizationSettings(
+    organizationId: string,
+    updates: { name?: string; settings?: Record<string, any> }
+  ) {
+    try {
+      const { data, error } = await supabase
+        .from('organizations')
+        .update({
+          ...(updates.name !== undefined ? { name: updates.name } : {}),
+          ...(updates.settings !== undefined ? { settings: updates.settings } : {})
+        })
+        .eq('id', organizationId)
+        .select('*')
+        .single()
+
+      if (error) throw error
+      return data as Database['public']['Tables']['organizations']['Row']
+    } catch (error) {
+      handleSupabaseError(error)
+      throw error
+    }
+  },
+
   // Get recent orders
-  async getRecentOrders(limit = 50) {
+  async getRecentOrders(organizationId: string, limit = 50) {
     try {
       const { data, error } = await supabase
         .from('orders')
@@ -201,6 +248,7 @@ export const api = {
             number
           )
         `)
+        .eq('organization_id', organizationId)
         .order('created_at', { ascending: false })
         .limit(limit)
       
@@ -213,11 +261,12 @@ export const api = {
   },
 
   // Get revenue statistics (excluding cancelled orders)
-  async getRevenueStats(startDate?: string, endDate?: string) {
+  async getRevenueStats(organizationId: string, startDate?: string, endDate?: string) {
     try {
       let query = (supabase as any)
         .from('orders')
         .select('total_amount, status, created_at')
+        .eq('organization_id', organizationId)
         .neq('status', 'cancelled') // Exclude cancelled orders
         .order('created_at', { ascending: false })
 
@@ -251,12 +300,13 @@ export const api = {
   },
 
   // Get menu item by ID
-  async getMenuItem(id: string) {
+  async getMenuItem(id: string, organizationId: string) {
     try {
       const { data, error } = await supabase
         .from('menu_items')
         .select('*')
         .eq('id', id)
+        .eq('organization_id', organizationId)
         .single()
       
       if (error) throw error
@@ -268,7 +318,7 @@ export const api = {
   },
 
   // Create menu item
-  async createMenuItem(item: any) {
+  async createMenuItem(item: Omit<any, 'organization_id'>, organizationId: string) {
     try {
       console.log('Creating menu item:', item)
       
@@ -280,7 +330,7 @@ export const api = {
       
       const { data, error } = await (supabase as any)
         .from('menu_items')
-        .insert([item])
+        .insert([{ ...item, organization_id: organizationId }])
         .select()
       
       if (error) {
@@ -304,7 +354,7 @@ export const api = {
   },
 
   // Update menu item
-  async updateMenuItem(id: string, updates: any) {
+  async updateMenuItem(id: string, updates: any, organizationId: string) {
     try {
       console.log('Updating menu item:', { id, updates })
       
@@ -342,6 +392,7 @@ export const api = {
         .from('menu_items')
         .update(filteredUpdates)
         .eq('id', id)
+        .eq('organization_id', organizationId)
         .select()
       
       if (error) {
@@ -369,12 +420,13 @@ export const api = {
   },
 
   // Delete menu item
-  async deleteMenuItem(id: string) {
+  async deleteMenuItem(id: string, organizationId: string) {
     try {
       const { error } = await supabase
         .from('menu_items')
         .delete()
         .eq('id', id)
+        .eq('organization_id', organizationId)
       
       if (error) throw error
     } catch (error) {
@@ -384,11 +436,12 @@ export const api = {
   },
 
   // Daily menu management
-  async getTodayMenuItems() {
+  async getTodayMenuItems(organizationId: string) {
     try {
       const { data, error } = await supabase
         .from('menu_items')
         .select('*')
+        .eq('organization_id', organizationId)
         .eq('is_today_menu', true)
         .eq('is_available', true)
         .order('name')
@@ -401,12 +454,13 @@ export const api = {
     }
   },
 
-  async setTodayMenu(itemIds: string[]) {
+  async setTodayMenu(itemIds: string[], organizationId: string) {
     try {
-      // First, clear all today menu selections
+      // First, clear all today menu selections for this organization
       const { error: clearError } = await (supabase as any)
         .from('menu_items')
         .update({ is_today_menu: false })
+        .eq('organization_id', organizationId)
         .eq('is_today_menu', true)
       
       if (clearError) throw clearError
@@ -416,6 +470,7 @@ export const api = {
         const { error: setError } = await (supabase as any)
           .from('menu_items')
           .update({ is_today_menu: true })
+          .eq('organization_id', organizationId)
           .in('id', itemIds)
         
         if (setError) throw setError
@@ -428,12 +483,13 @@ export const api = {
     }
   },
 
-  async toggleTodayMenu(itemId: string, isTodayMenu: boolean) {
+  async toggleTodayMenu(itemId: string, isTodayMenu: boolean, organizationId: string) {
     try {
       const { error } = await (supabase as any)
         .from('menu_items')
         .update({ is_today_menu: isTodayMenu })
         .eq('id', itemId)
+        .eq('organization_id', organizationId)
       
       if (error) throw error
     } catch (error) {
@@ -442,4 +498,3 @@ export const api = {
     }
   },
 }
-

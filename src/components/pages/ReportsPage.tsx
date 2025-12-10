@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { formatCurrency } from '../../lib/utils'
+import { useOrganizationStore } from '../../stores/useOrganizationStore'
 import {
   LineChart,
   Line,
@@ -21,6 +22,7 @@ export const ReportsPage: React.FC = () => {
   const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'custom'>('today')
   const [customStartDate, setCustomStartDate] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
+  const { currentOrganization, isLoading: isLoadingOrgs } = useOrganizationStore()
 
   // Get date range for queries
   const getDateRange = () => {
@@ -46,15 +48,37 @@ export const ReportsPage: React.FC = () => {
 
   // Fetch revenue data
   const { isLoading: revenueLoading } = useQuery({
-    queryKey: ['revenueStats', startDate, endDate],
-    queryFn: () => api.getRevenueStats(startDate, endDate)
+    queryKey: ['revenueStats', currentOrganization?.id, startDate, endDate],
+    queryFn: () => api.getRevenueStats(currentOrganization!.id, startDate, endDate),
+    enabled: !!currentOrganization
   })
 
   // Fetch all orders for detailed analytics
   const { data: allOrders = [], isLoading: ordersLoading } = useQuery({
-    queryKey: ['orders'],
-    queryFn: () => api.getRecentOrders(100)
+    queryKey: ['orders', currentOrganization?.id],
+    queryFn: () => api.getRecentOrders(currentOrganization!.id, 100),
+    enabled: !!currentOrganization
   })
+
+  // Show loading or no org message
+  if (isLoadingOrgs) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-lg text-gray-600">Loading organization...</div>
+      </div>
+    )
+  }
+
+  if (!currentOrganization) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-center">
+          <p className="text-lg text-gray-600 mb-2">No organization selected</p>
+          <p className="text-sm text-gray-500">Please select an organization to view reports.</p>
+        </div>
+      </div>
+    )
+  }
 
   // Filter orders by date range
   const filteredOrders = allOrders.filter((order: any) => {

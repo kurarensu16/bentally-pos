@@ -1,11 +1,7 @@
-const CACHE_NAME = 'ate-lories-pos-v1';
+const CACHE_NAME = 'bentally-pos-v1';
 const urlsToCache = [
   '/',
-  '/static/js/bundle.js',
-  '/static/css/main.css',
-  '/manifest.json',
-  '/icon-192x192.png',
-  '/icon-512x512.png'
+  '/manifest.json'
 ];
 
 // Install event - cache resources
@@ -14,23 +10,59 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('Opened cache');
-        return cache.addAll(urlsToCache);
+        // Use add() for each URL instead of addAll() to handle missing files gracefully
+        return Promise.allSettled(
+          urlsToCache.map(url => 
+            cache.add(url).catch(err => {
+              console.warn(`Failed to cache ${url}:`, err);
+              return null; // Continue even if one file fails
+            })
+          )
+        );
+      })
+      .then(() => {
+        // Skip waiting to activate immediately
+        return self.skipWaiting();
       })
   );
 });
 
 // Fetch event - serve from cache when offline
 self.addEventListener('fetch', (event) => {
+  // Skip non-GET requests and external URLs
+  if (event.request.method !== 'GET' || !event.request.url.startsWith(self.location.origin)) {
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request)
       .then((response) => {
-        // Return cached version or fetch from network
+        // Return cached version if available
         if (response) {
           return response;
         }
-        return fetch(event.request);
-      }
-    )
+        // Otherwise fetch from network
+        return fetch(event.request)
+          .then((response) => {
+            // Don't cache non-successful responses
+            if (!response || response.status !== 200 || response.type !== 'basic') {
+              return response;
+            }
+            // Clone the response for caching
+            const responseToCache = response.clone();
+            caches.open(CACHE_NAME)
+              .then((cache) => {
+                cache.put(event.request, responseToCache);
+              });
+            return response;
+          })
+          .catch(() => {
+            // If fetch fails and we're offline, return a fallback
+            if (event.request.destination === 'document') {
+              return caches.match('/');
+            }
+          });
+      })
   );
 });
 
@@ -46,6 +78,10 @@ self.addEventListener('activate', (event) => {
           }
         })
       );
+    })
+    .then(() => {
+      // Take control of all pages immediately
+      return self.clients.claim();
     })
   );
 });

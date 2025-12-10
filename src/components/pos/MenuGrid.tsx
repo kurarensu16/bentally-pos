@@ -1,21 +1,44 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { usePosStore } from '../../stores/usePosStore'
+import { useOrganizationStore } from '../../stores/useOrganizationStore'
 import { formatCurrency } from '../../lib/utils'
 import { api } from '../../lib/api'
 
 export const MenuGrid: React.FC = () => {
   const { addToCart } = usePosStore()
+  const { currentOrganization, isLoading: isLoadingOrgs } = useOrganizationStore()
 
   const { data: menuItems = [], isLoading, error } = useQuery({
-    queryKey: ['todayMenuItems'],
-    queryFn: api.getTodayMenuItems
+    queryKey: ['todayMenuItems', currentOrganization?.id],
+    queryFn: () => api.getTodayMenuItems(currentOrganization!.id),
+    enabled: !!currentOrganization
   })
 
   const { data: categories = [] } = useQuery({
-    queryKey: ['categories'],
-    queryFn: api.getCategories
+    queryKey: ['categories', currentOrganization?.id],
+    queryFn: () => api.getCategories(currentOrganization!.id),
+    enabled: !!currentOrganization
   })
+
+  if (isLoadingOrgs) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-lg text-gray-600">Loading organization...</div>
+      </div>
+    )
+  }
+
+  if (!currentOrganization) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-center">
+          <p className="text-lg text-gray-600 mb-2">No organization selected</p>
+          <p className="text-sm text-gray-500">Please select an organization to view menu.</p>
+        </div>
+      </div>
+    )
+  }
 
   if (isLoading) {
     return (
